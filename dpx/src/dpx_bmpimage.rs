@@ -27,6 +27,8 @@
     unused_mut
 )]
 
+use image::bmp::BMPDecoder;
+
 use super::dpx_mem::new;
 use super::dpx_numbers::tt_get_unsigned_byte;
 use super::dpx_pdfximage::{pdf_ximage_init_image_info, pdf_ximage_set_image};
@@ -49,7 +51,7 @@ use bridge::InputHandleWrapper;
 use crate::dpx_pdfximage::{pdf_ximage, ximage_info};
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct hdr_info {
+struct hdr_info {
     pub offset: u32,
     pub hsize: u32,
     pub width: u32,
@@ -60,23 +62,17 @@ pub struct hdr_info {
     pub x_pix_per_meter: u32,
     pub y_pix_per_meter: u32,
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn check_for_bmp(handle: &mut InputHandleWrapper) -> i32 {
-    let mut sigbytes: [u8; 2] = [0; 2];
     handle.seek(SeekFrom::Start(0)).unwrap();
-    if ttstub_input_read(
-        handle.0.as_ptr(),
-        sigbytes.as_mut_ptr() as *mut i8,
-        ::std::mem::size_of::<[u8; 2]>() as u64,
-    ) as u64
-        != ::std::mem::size_of::<[u8; 2]>() as u64
-        || sigbytes[0] as i32 != 'B' as i32
-        || sigbytes[1] as i32 != 'M' as i32
-    {
-        return 0i32;
+    if let Ok(decoder) = BMPDecoder::new(handle.clone()) {
+        1
+    } else {
+        0
     }
-    1i32
 }
+
 unsafe fn get_density(mut xdensity: *mut f64, mut ydensity: *mut f64, mut hdr: *mut hdr_info) {
     if (*hdr).x_pix_per_meter > 0_u32 && (*hdr).y_pix_per_meter > 0_u32 {
         /* 0 for undefined. FIXME */
@@ -87,6 +83,7 @@ unsafe fn get_density(mut xdensity: *mut f64, mut ydensity: *mut f64, mut hdr: *
         *ydensity = 1.0f64
     };
 }
+
 #[no_mangle]
 pub unsafe extern "C" fn bmp_get_bbox(
     handle: &mut InputHandleWrapper,
@@ -120,6 +117,9 @@ pub unsafe extern "C" fn bmp_get_bbox(
     get_density(xdensity, ydensity, &mut hdr);
     r
 }
+
+/// On success, writes a PDF stream into ximage and returns 0.
+/// On failure, emits warning and returns -1.
 #[no_mangle]
 pub unsafe extern "C" fn bmp_include_image(
     mut ximage: *mut pdf_ximage,
